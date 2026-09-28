@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../../lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "../../lib/firebase";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
@@ -17,12 +18,34 @@ export default function LoginPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+
     setError("");
     setLoading(true);
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      router.push("/dashboard");
+      const credential = await signInWithEmailAndPassword(
+        auth,
+        email.trim().toLowerCase(),
+        password
+      );
+
+      const snap = await getDoc(
+        doc(db, "users", credential.user.uid)
+      );
+
+      if (!snap.exists()) {
+        await auth.signOut();
+        setError("Your account profile was not found.");
+        return;
+      }
+
+      const role = snap.data().role;
+
+      if (role === "user") {
+        router.push("/user-dashboard");
+      } else {
+        router.push("/dashboard");
+      }
     } catch {
       setError("Invalid email or password.");
     } finally {
@@ -34,7 +57,10 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-slate-900">Welcome Back</h1>
+          <h1 className="text-3xl font-bold text-slate-900">
+            Welcome Back
+          </h1>
+
           <p className="mt-2 text-sm text-slate-500">
             Sign in to your Task Manager account
           </p>
@@ -51,9 +77,10 @@ export default function LoginPage() {
             <label className="mb-2 block text-sm font-medium text-slate-700">
               Email
             </label>
+
             <input
-              type="email"
               required
+              type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter your email"
@@ -68,8 +95,8 @@ export default function LoginPage() {
 
             <div className="relative">
               <input
-                type={showPassword ? "text" : "password"}
                 required
+                type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter your password"
@@ -78,7 +105,9 @@ export default function LoginPage() {
 
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
+                onClick={() =>
+                  setShowPassword(!showPassword)
+                }
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500"
               >
                 {showPassword ? "Hide" : "Show"}
@@ -110,12 +139,12 @@ export default function LoginPage() {
         </form>
 
         <p className="mt-6 text-center text-sm text-slate-500">
-          Don't have an account?{" "}
+          Need an Admin account?{" "}
           <Link
             href="/register"
             className="font-semibold text-slate-900 hover:underline"
           >
-            Create Account
+            Create Admin Account
           </Link>
         </p>
       </div>
