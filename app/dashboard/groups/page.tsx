@@ -3,22 +3,23 @@
 import { useEffect, useState } from "react";
 import {
   addDoc,
+  arrayUnion,
   collection,
+  doc,
   getDocs,
   query,
   serverTimestamp,
   updateDoc,
-  doc,
   where,
-  arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../../../lib/firebase";
 
-type UserItem = {
+type MemberItem = {
   id: string;
   name: string;
   email: string;
+  role: "admin" | "user";
 };
 
 type GroupItem = {
@@ -30,10 +31,11 @@ type GroupItem = {
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<GroupItem[]>([]);
-  const [users, setUsers] = useState<UserItem[]>([]);
+  const [members, setMembers] = useState<MemberItem[]>([]);
+
   const [name, setName] = useState("");
   const [selectedGroup, setSelectedGroup] = useState("");
-  const [selectedUser, setSelectedUser] = useState("");
+  const [selectedMember, setSelectedMember] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -50,24 +52,40 @@ export default function GroupsPage() {
       where("adminIds", "array-contains", adminId)
     );
 
-    const [groupSnap, userSnap] = await Promise.all([
-      getDocs(groupQuery),
-      getDocs(userQuery),
-    ]);
-
-    setGroups(
-      groupSnap.docs.map((item) => ({
-        id: item.id,
-        ...item.data(),
-      })) as GroupItem[]
+    const adminQuery = query(
+      collection(db, "users"),
+      where("role", "==", "admin")
     );
 
-    setUsers(
-      userSnap.docs.map((item) => ({
-        id: item.id,
-        ...item.data(),
-      })) as UserItem[]
+    const [groupSnap, userSnap, adminSnap] =
+      await Promise.all([
+        getDocs(groupQuery),
+        getDocs(userQuery),
+        getDocs(adminQuery),
+      ]);
+
+    const groupData = groupSnap.docs.map((item) => ({
+      id: item.id,
+      ...item.data(),
+    })) as GroupItem[];
+
+    const userData = userSnap.docs.map((item) => ({
+      id: item.id,
+      ...item.data(),
+    })) as MemberItem[];
+
+    const adminData = adminSnap.docs.map((item) => ({
+      id: item.id,
+      ...item.data(),
+    })) as MemberItem[];
+
+    const combined = [...adminData, ...userData].filter(
+      (item, index, array) =>
+        array.findIndex((x) => x.id === item.id) === index
     );
+
+    setGroups(groupData);
+    setMembers(combined);
   }
 
   useEffect(() => {
@@ -117,33 +135,51 @@ export default function GroupsPage() {
     }
   }
 
-  async function addUserToGroup() {
-    if (!selectedGroup || !selectedUser) {
-      setMessage("Select a group and user.");
+  async function addMemberToGroup() {
+    if (!selectedGroup || !selectedMember) {
+      setMessage("Select a group and member.");
       return;
     }
 
+    const member = members.find(
+      (item) => item.id === selectedMember
+    );
+
+    if (!member) return;
+
     try {
-      await updateDoc(doc(db, "groups", selectedGroup), {
-        userIds: arrayUnion(selectedUser),
-      });
+      const groupRef = doc(db, "groups", selectedGroup);
+
+      if (member.role === "admin") {
+        await updateDoc(groupRef, {
+          adminIds: arrayUnion(member.id),
+        });
+      } else {
+        await updateDoc(groupRef, {
+          userIds: arrayUnion(member.id),
+        });
+      }
 
       if (auth.currentUser) {
         await loadData(auth.currentUser.uid);
       }
 
-      setMessage("User added to group.");
+      setSelectedMember("");
+      setMessage("Member added to group.");
     } catch {
-      setMessage("Unable to add user to group.");
+      setMessage("Unable to add member to group.");
     }
   }
 
   return (
     <main className="p-5 md:p-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900">Groups</h1>
+        <h1 className="text-3xl font-bold text-slate-900">
+          Groups
+        </h1>
+
         <p className="mt-1 text-slate-500">
-          Create groups and organize users.
+          Create groups and organize Admins and Users.
         </p>
       </div>
 
@@ -160,7 +196,10 @@ export default function GroupsPage() {
               Create Group
             </h2>
 
-            <form onSubmit={createGroup} className="mt-5 space-y-4">
+            <form
+              onSubmit={createGroup}
+              className="mt-5 space-y-4"
+            >
               <input
                 required
                 value={name}
@@ -180,7 +219,7 @@ export default function GroupsPage() {
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-bold text-slate-900">
-              Add User
+              Add Member
             </h2>
 
             <div className="mt-5 space-y-4">
@@ -190,28 +229,38 @@ export default function GroupsPage() {
                 className="w-full rounded-xl border border-slate-300 px-4 py-3"
               >
                 <option value="">Select Group</option>
+
                 {groups.map((group) => (
-                  <option key={group.id} value={group.id}>
+                  <option
+                    key={group.id}
+                    value={group.id}
+                  >
                     {group.name}
                   </option>
                 ))}
               </select>
 
               <select
-                value={selectedUser}
-                onChange={(e) => setSelectedUser(e.target.value)}
+                value={selectedMember}
+                onChange={(e) =>
+                  setSelectedMember(e.target.value)
+                }
                 className="w-full rounded-xl border border-slate-300 px-4 py-3"
               >
-                <option value="">Select User</option>
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name} — {user.email}
+                <option value="">Select Member</option>
+
+                {members.map((member) => (
+                  <option
+                    key={member.id}
+                    value={member.id}
+                  >
+                    {member.name} — {member.role}
                   </option>
                 ))}
               </select>
 
               <button
-                onClick={addUserToGroup}
+                onClick={addMemberToGroup}
                 className="w-full rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Add Member
@@ -246,7 +295,7 @@ export default function GroupsPage() {
                     {group.name}
                   </h3>
 
-                  <div className="mt-4 flex gap-5 text-sm text-slate-500">
+                  <div className="mt-4 flex flex-wrap gap-5 text-sm text-slate-500">
                     <span>
                       {group.adminIds?.length || 0} Admins
                     </span>
@@ -254,6 +303,11 @@ export default function GroupsPage() {
                     <span>
                       {group.userIds?.length || 0} Users
                     </span>
+                  </div>
+
+                  <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                    Admins in this group can share relevant group
+                    information and tasks.
                   </div>
                 </div>
               ))}
