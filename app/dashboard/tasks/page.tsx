@@ -60,64 +60,124 @@ export default function TasksPage() {
   const [message, setMessage] = useState("");
 
   async function loadData(adminId: string) {
-    const taskQuery = query(
-      collection(db, "tasks"),
-      where(
-        "visibleToAdminIds",
-        "array-contains",
-        adminId
-      )
-    );
+    setMessage("");
 
-    const userQuery = query(
-      collection(db, "users"),
-      where("adminIds", "array-contains", adminId)
-    );
+    try {
+      const taskQuery = query(
+        collection(db, "tasks"),
+        where(
+          "visibleToAdminIds",
+          "array-contains",
+          adminId
+        )
+      );
 
-    const groupQuery = query(
-      collection(db, "groups"),
-      where("adminIds", "array-contains", adminId)
-    );
+      const userQuery = query(
+        collection(db, "users"),
+        where(
+          "adminIds",
+          "array-contains",
+          adminId
+        )
+      );
 
-    const [taskSnap, userSnap, groupSnap] =
-      await Promise.all([
-        getDocs(taskQuery),
-        getDocs(userQuery),
-        getDocs(groupQuery),
-      ]);
+      const groupQuery = query(
+        collection(db, "groups"),
+        where(
+          "adminIds",
+          "array-contains",
+          adminId
+        )
+      );
 
-    setTasks(
-      taskSnap.docs.map((item) => ({
-        id: item.id,
-        ...item.data(),
-      })) as Task[]
-    );
+      const taskPromise = getDocs(taskQuery);
+      const userPromise = getDocs(userQuery);
+      const groupPromise = getDocs(groupQuery);
 
-    setUsers(
-      userSnap.docs.map((item) => ({
-        id: item.id,
-        ...item.data(),
-      })) as UserItem[]
-    );
+      const [taskResult, userResult, groupResult] =
+        await Promise.allSettled([
+          taskPromise,
+          userPromise,
+          groupPromise,
+        ]);
 
-    setGroups(
-      groupSnap.docs.map((item) => ({
-        id: item.id,
-        ...item.data(),
-      })) as GroupItem[]
-    );
+      if (taskResult.status === "fulfilled") {
+        setTasks(
+          taskResult.value.docs.map((item) => ({
+            id: item.id,
+            ...item.data(),
+          })) as Task[]
+        );
+      } else {
+        setTasks([]);
+      }
+
+      if (userResult.status === "fulfilled") {
+        setUsers(
+          userResult.value.docs
+            .map((item) => ({
+              id: item.id,
+              ...item.data(),
+            }))
+            .filter(
+              (item: any) =>
+                item.role === "user"
+            ) as UserItem[]
+        );
+      } else {
+        setUsers([]);
+        console.error(
+          "Users loading error:",
+          userResult.reason
+        );
+        setMessage(
+          "Unable to load users. Please check your Firestore Rules."
+        );
+      }
+
+      if (groupResult.status === "fulfilled") {
+        setGroups(
+          groupResult.value.docs.map(
+            (item) => ({
+              id: item.id,
+              ...item.data(),
+            })
+          ) as GroupItem[]
+        );
+      } else {
+        setGroups([]);
+        console.error(
+          "Groups loading error:",
+          groupResult.reason
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Task data loading error:",
+        error
+      );
+
+      setTasks([]);
+      setUsers([]);
+      setGroups([]);
+
+      setMessage(
+        "Unable to load task data. Please check your Firestore Rules."
+      );
+    }
   }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
       auth,
       async (user) => {
-        if (!user) return;
+        if (!user) {
+          setLoading(false);
+          return;
+        }
 
         try {
           await loadData(user.uid);
-        } catch {
-          setMessage("Unable to load task data.");
         } finally {
           setLoading(false);
         }
@@ -127,13 +187,23 @@ export default function TasksPage() {
     return () => unsubscribe();
   }, []);
 
-  async function createTask(e: React.FormEvent) {
+  async function createTask(
+    e: React.FormEvent
+  ) {
     e.preventDefault();
 
-    if (!auth.currentUser) return;
+    if (!auth.currentUser) {
+      setMessage("Please login again.");
+      return;
+    }
 
-    if (!title.trim() || !assignedTo) {
-      setMessage("Enter a title and select a user.");
+    if (!title.trim()) {
+      setMessage("Enter a task title.");
+      return;
+    }
+
+    if (!assignedTo) {
+      setMessage("Please select a user.");
       return;
     }
 
@@ -141,14 +211,24 @@ export default function TasksPage() {
     setMessage("");
 
     try {
-      const adminId = auth.currentUser.uid;
+      const adminId =
+        auth.currentUser.uid;
 
       const selectedUser = users.find(
-        (user) => user.id === assignedTo
+        (user) =>
+          user.id === assignedTo
       );
 
+      if (!selectedUser) {
+        setMessage(
+          "Selected user was not found. Please refresh the page."
+        );
+        return;
+      }
+
       const selectedGroup = groups.find(
-        (group) => group.id === groupId
+        (group) =>
+          group.id === groupId
       );
 
       const visibleToAdminIds =
@@ -156,28 +236,33 @@ export default function TasksPage() {
           ? selectedGroup.adminIds
           : [adminId];
 
-      await addDoc(collection(db, "tasks"), {
-        title: title.trim(),
-        description: description.trim(),
-
-        assignedTo,
-        assignedToName: selectedUser?.name || "User",
-
-        assignedBy: adminId,
-        assignedByName:
-          auth.currentUser.displayName || "Admin",
-
-        groupId: selectedGroup?.id || "",
-        groupName: selectedGroup?.name || "",
-
-        status: "Pending",
-        priority,
-        dueDate,
-
-        visibleToAdminIds,
-
-        createdAt: serverTimestamp(),
-      });
+      await addDoc(
+        collection(db, "tasks"),
+        {
+          title: title.trim(),
+          description:
+            description.trim(),
+          assignedTo,
+          assignedToName:
+            selectedUser.name ||
+            "User",
+          assignedBy: adminId,
+          assignedByName:
+            auth.currentUser
+              .displayName ||
+            "Admin",
+          groupId:
+            selectedGroup?.id || "",
+          groupName:
+            selectedGroup?.name || "",
+          status: "Pending",
+          priority,
+          dueDate,
+          visibleToAdminIds,
+          createdAt:
+            serverTimestamp(),
+        }
+      );
 
       await loadData(adminId);
 
@@ -188,9 +273,27 @@ export default function TasksPage() {
       setPriority("Medium");
       setDueDate("");
 
-      setMessage("Task created successfully.");
-    } catch {
-      setMessage("Unable to create task.");
+      setMessage(
+        "Task created successfully."
+      );
+    } catch (error: any) {
+      console.error(
+        "Create task error:",
+        error
+      );
+
+      if (
+        error?.code ===
+        "permission-denied"
+      ) {
+        setMessage(
+          "You do not have permission to create this task. Please check Firestore Rules."
+        );
+      } else {
+        setMessage(
+          "Unable to create task."
+        );
+      }
     } finally {
       setSaving(false);
     }
@@ -209,12 +312,22 @@ export default function TasksPage() {
       setTasks((current) =>
         current.map((task) =>
           task.id === taskId
-            ? { ...task, status }
+            ? {
+                ...task,
+                status,
+              }
             : task
         )
       );
-    } catch {
-      setMessage("Unable to update task.");
+    } catch (error) {
+      console.error(
+        "Status update error:",
+        error
+      );
+
+      setMessage(
+        "Unable to update task."
+      );
     }
   }
 
@@ -237,6 +350,7 @@ export default function TasksPage() {
       )}
 
       <div className="grid gap-8 lg:grid-cols-3">
+
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-bold text-slate-900">
             Create Task
@@ -259,7 +373,9 @@ export default function TasksPage() {
             <textarea
               value={description}
               onChange={(e) =>
-                setDescription(e.target.value)
+                setDescription(
+                  e.target.value
+                )
               }
               placeholder="Description"
               rows={4}
@@ -270,35 +386,51 @@ export default function TasksPage() {
               required
               value={assignedTo}
               onChange={(e) =>
-                setAssignedTo(e.target.value)
+                setAssignedTo(
+                  e.target.value
+                )
               }
               className="w-full rounded-xl border border-slate-300 px-4 py-3"
             >
-              <option value="">Assign To</option>
+              <option value="">
+                Assign To
+              </option>
 
               {users
                 .filter(
                   (user) =>
-                    user.id !== auth.currentUser?.uid
+                    user.id !==
+                    auth.currentUser?.uid
                 )
                 .map((user) => (
                   <option
                     key={user.id}
                     value={user.id}
                   >
-                    {user.name} — {user.email}
+                    {user.name} —{" "}
+                    {user.email}
                   </option>
                 ))}
             </select>
 
+            {users.length === 0 && !loading && (
+              <p className="text-xs text-red-600">
+                No Users are available for assignment.
+              </p>
+            )}
+
             <select
               value={groupId}
               onChange={(e) =>
-                setGroupId(e.target.value)
+                setGroupId(
+                  e.target.value
+                )
               }
               className="w-full rounded-xl border border-slate-300 px-4 py-3"
             >
-              <option value="">No Group</option>
+              <option value="">
+                No Group
+              </option>
 
               {groups.map((group) => (
                 <option
@@ -313,7 +445,9 @@ export default function TasksPage() {
             <select
               value={priority}
               onChange={(e) =>
-                setPriority(e.target.value)
+                setPriority(
+                  e.target.value
+                )
               }
               className="w-full rounded-xl border border-slate-300 px-4 py-3"
             >
@@ -326,13 +460,20 @@ export default function TasksPage() {
               type="date"
               value={dueDate}
               onChange={(e) =>
-                setDueDate(e.target.value)
+                setDueDate(
+                  e.target.value
+                )
               }
               className="w-full rounded-xl border border-slate-300 px-4 py-3"
             />
 
             <button
-              disabled={saving}
+              type="submit"
+              disabled={
+                saving ||
+                loading ||
+                users.length === 0
+              }
               className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-50"
             >
               {saving
@@ -343,6 +484,7 @@ export default function TasksPage() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
+
           <div className="border-b p-6">
             <h2 className="text-lg font-bold text-slate-900">
               Task List
@@ -359,12 +501,14 @@ export default function TasksPage() {
             </div>
           ) : (
             <div className="divide-y">
+
               {tasks.map((task) => (
                 <div
                   key={task.id}
                   className="p-6"
                 >
                   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+
                     <div>
                       <h3 className="font-semibold text-slate-900">
                         {task.title}
@@ -383,11 +527,9 @@ export default function TasksPage() {
                         • Given by{" "}
                         {task.assignedByName ||
                           "Admin"}
-
                         {task.groupName
                           ? ` • Group: ${task.groupName}`
                           : ""}
-
                         {task.dueDate
                           ? ` • Due: ${task.dueDate}`
                           : ""}
@@ -395,6 +537,7 @@ export default function TasksPage() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
+
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium">
                         {task.priority ||
                           "Medium"}
@@ -426,14 +569,17 @@ export default function TasksPage() {
                           Overdue
                         </option>
                       </select>
+
                     </div>
                   </div>
                 </div>
               ))}
+
             </div>
           )}
         </div>
+
       </div>
     </main>
   );
-}
+  }
