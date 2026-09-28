@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return signedIn()
+        && request.auth.token.email == "superadmin430@gmail.com";
+    }
+
+    function isOwner(userId) {
+      return signedIn()
+        && request.auth.uid == userId;
+    }
+
+    function userExists(userId) {
+      return exists(
+        /databases/$(database)/documents/users/$(userId)
+      );
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && userExists(request.auth.uid)
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == "admin";
+    }
+
+    match /users/{userId} {
+      allow create: if isOwner(userId);
+
+      allow read: if isSuperAdmin()
+        || isOwner(userId)
+        || (
+          isAdmin()
+          && resource.data.role == "user"
+        );
+
+      allow update: if isSuperAdmin() || isOwner(userId);
+
+      allow delete: if isSuperAdmin();
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn();
+
+      allow create: if isAdmin() || isSuperAdmin();
+
+      allow update, delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /groupMembers/{memberId} {
+      allow read: if signedIn();
+
+      allow create, update, delete: if isAdmin() || isSuperAdmin();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isSuperAdmin()
+        || (
+          signedIn()
+          && (
+            resource.data.assignedTo == request.auth.uid
+            || resource.data.assignedBy == request.auth.uid
+          )
+        );
+
+      allow create: if isAdmin() || isSuperAdmin();
+
+      allow update: if isSuperAdmin()
+        || (
+          signedIn()
+          && resource.data.assignedTo == request.auth.uid
+        )
+        || (
+          signedIn()
+          && resource.data.assignedBy == request.auth.uid
+        );
+
+      allow delete: if isAdmin() || isSuperAdmin();
+    }
+  }
+}
