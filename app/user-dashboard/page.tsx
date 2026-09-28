@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   query,
   updateDoc,
-  doc,
   where,
 } from "firebase/firestore";
 import { auth, db } from "../../lib/firebase";
@@ -33,53 +34,92 @@ export default function UserDashboardPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        router.replace("/login");
-        return;
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (user) => {
+        if (!user) {
+          router.replace("/login");
+          return;
+        }
+
+        try {
+          const profile = await getDoc(
+            doc(db, "users", user.uid)
+          );
+
+          if (
+            profile.exists() &&
+            profile.data().role !== "user"
+          ) {
+            router.replace("/dashboard");
+            return;
+          }
+
+          setName(
+            profile.exists()
+              ? profile.data().name ||
+                  user.displayName ||
+                  "User"
+              : user.displayName || "User"
+          );
+
+          const q = query(
+            collection(db, "tasks"),
+            where(
+              "assignedTo",
+              "==",
+              user.uid
+            )
+          );
+
+          const snap = await getDocs(q);
+
+          const loaded = snap.docs.map(
+            (item) => ({
+              id: item.id,
+              ...item.data(),
+            })
+          ) as Task[];
+
+          setTasks(loaded);
+        } catch {
+          setError(
+            "Unable to load your tasks."
+          );
+        } finally {
+          setLoading(false);
+        }
       }
-
-      setName(user.displayName || "User");
-
-      try {
-        const q = query(
-          collection(db, "tasks"),
-          where("assignedTo", "==", user.uid)
-        );
-
-        const snap = await getDocs(q);
-
-        const loaded = snap.docs.map((item) => ({
-          id: item.id,
-          ...item.data(),
-        })) as Task[];
-
-        setTasks(loaded);
-      } catch {
-        setError("Unable to load your tasks.");
-      } finally {
-        setLoading(false);
-      }
-    });
+    );
 
     return () => unsubscribe();
   }, [router]);
 
-  async function markCompleted(taskId: string) {
+  async function markCompleted(
+    taskId: string
+  ) {
     try {
-      await updateDoc(doc(db, "tasks", taskId), {
-        status: "Completed",
-      });
+      await updateDoc(
+        doc(db, "tasks", taskId),
+        {
+          status: "Completed",
+        }
+      );
 
       setTasks((current) =>
         current.map((task) =>
           task.id === taskId
-            ? { ...task, status: "Completed" }
+            ? {
+                ...task,
+                status: "Completed",
+              }
             : task
         )
       );
     } catch {
-      setError("Unable to update task.");
+      setError(
+        "Unable to update task."
+      );
     }
   }
 
@@ -89,15 +129,18 @@ export default function UserDashboardPage() {
   }
 
   const pending = tasks.filter(
-    (task) => task.status === "Pending"
+    (task) =>
+      task.status === "Pending"
   ).length;
 
   const inProgress = tasks.filter(
-    (task) => task.status === "In Progress"
+    (task) =>
+      task.status === "In Progress"
   ).length;
 
   const completed = tasks.filter(
-    (task) => task.status === "Completed"
+    (task) =>
+      task.status === "Completed"
   ).length;
 
   return (
@@ -130,15 +173,30 @@ export default function UserDashboardPage() {
           </h2>
 
           <p className="mt-1 text-slate-500">
-            View and manage the tasks assigned to you.
+            View and complete tasks assigned to you.
           </p>
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat title="Total Tasks" value={tasks.length} />
-          <Stat title="Pending" value={pending} />
-          <Stat title="In Progress" value={inProgress} />
-          <Stat title="Completed" value={completed} />
+          <Stat
+            title="Total Tasks"
+            value={tasks.length}
+          />
+
+          <Stat
+            title="Pending"
+            value={pending}
+          />
+
+          <Stat
+            title="In Progress"
+            value={inProgress}
+          />
+
+          <Stat
+            title="Completed"
+            value={completed}
+          />
         </div>
 
         {error && (
@@ -171,7 +229,10 @@ export default function UserDashboardPage() {
           ) : (
             <div className="divide-y">
               {tasks.map((task) => (
-                <div key={task.id} className="p-6">
+                <div
+                  key={task.id}
+                  className="p-6"
+                >
                   <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0">
                       <h4 className="text-lg font-semibold text-slate-900">
@@ -188,7 +249,8 @@ export default function UserDashboardPage() {
                         <span>
                           Given by{" "}
                           <strong className="text-slate-700">
-                            {task.assignedByName || "Admin"}
+                            {task.assignedByName ||
+                              "Admin"}
                           </strong>
                         </span>
 
@@ -214,16 +276,23 @@ export default function UserDashboardPage() {
 
                     <div className="flex flex-wrap items-center gap-3">
                       <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700">
-                        {task.priority || "Medium"}
+                        {task.priority ||
+                          "Medium"}
                       </span>
 
                       <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700">
-                        {task.status || "Pending"}
+                        {task.status ||
+                          "Pending"}
                       </span>
 
-                      {task.status !== "Completed" && (
+                      {task.status !==
+                        "Completed" && (
                         <button
-                          onClick={() => markCompleted(task.id)}
+                          onClick={() =>
+                            markCompleted(
+                              task.id
+                            )
+                          }
                           className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800"
                         >
                           Mark as Completed
@@ -250,11 +319,13 @@ function Stat({
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <p className="text-sm text-slate-500">{title}</p>
+      <p className="text-sm text-slate-500">
+        {title}
+      </p>
 
       <p className="mt-2 text-3xl font-bold text-slate-900">
         {value}
       </p>
     </div>
   );
-    }
+}
