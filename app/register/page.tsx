@@ -38,25 +38,33 @@ export default function RegisterPage() {
     try {
       const credential = await createUserWithEmailAndPassword(
         auth,
-        email,
+        email.trim().toLowerCase(),
         password
       );
 
       await updateProfile(credential.user, {
-        displayName: name,
+        displayName: name.trim(),
       });
 
       await setDoc(doc(db, "users", credential.user.uid), {
-        name,
-        email,
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
         role: "admin",
         status: "active",
+        adminIds: [credential.user.uid],
+        createdBy: credential.user.uid,
         createdAt: serverTimestamp(),
       });
 
       router.push("/dashboard");
-    } catch {
-      setError("Unable to create account. Please check your details.");
+    } catch (err: any) {
+      if (err?.code === "auth/email-already-in-use") {
+        setError("An account with this email already exists.");
+      } else if (err?.code === "auth/invalid-email") {
+        setError("Please enter a valid email address.");
+      } else {
+        setError("Unable to create account. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -67,10 +75,11 @@ export default function RegisterPage() {
       <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-slate-900">
-            Create Account
+            Create Admin Account
           </h1>
+
           <p className="mt-2 text-sm text-slate-500">
-            Create your Task Manager account
+            Create an administrator account for Task Manager.
           </p>
         </div>
 
@@ -107,6 +116,7 @@ export default function RegisterPage() {
               placeholder="Password"
               className="w-full rounded-xl border border-slate-300 px-4 py-3 pr-20 outline-none focus:border-slate-900"
             />
+
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
@@ -125,6 +135,7 @@ export default function RegisterPage() {
               placeholder="Confirm Password"
               className="w-full rounded-xl border border-slate-300 px-4 py-3 pr-20 outline-none focus:border-slate-900"
             />
+
             <button
               type="button"
               onClick={() => setShowConfirm(!showConfirm)}
@@ -137,9 +148,9 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-50"
           >
-            {loading ? "Creating Account..." : "Create Account"}
+            {loading ? "Creating Account..." : "Create Admin Account"}
           </button>
         </form>
 
