@@ -7,7 +7,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { auth, db } from "../../lib/firebase";
 import { useRouter } from "next/navigation";
 
-const SUPER_ADMIN_EMAIL = "superadmin59@gmail.com";
+const SUPER_ADMIN_EMAIL = "labpc4308077@gmail.com";
 
 export default function SuperAdminPage() {
 const router = useRouter();
