@@ -11,6 +11,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../../../lib/firebase";
@@ -57,12 +58,11 @@ export default function GroupsPage() {
       where("role", "==", "admin")
     );
 
-    const [groupSnap, userSnap, adminSnap] =
-      await Promise.all([
-        getDocs(groupQuery),
-        getDocs(userQuery),
-        getDocs(adminQuery),
-      ]);
+    const [groupSnap, userSnap, adminSnap] = await Promise.all([
+      getDocs(groupQuery),
+      getDocs(userQuery),
+      getDocs(adminQuery),
+    ]);
 
     const groupData = groupSnap.docs.map((item) => ({
       id: item.id,
@@ -145,29 +145,67 @@ export default function GroupsPage() {
       (item) => item.id === selectedMember
     );
 
-    if (!member) return;
+    const group = groups.find(
+      (item) => item.id === selectedGroup
+    );
+
+    if (!member || !group || !auth.currentUser) return;
+
+    setSaving(true);
+    setMessage("");
 
     try {
+      const batch = writeBatch(db);
+
       const groupRef = doc(db, "groups", selectedGroup);
 
       if (member.role === "admin") {
-        await updateDoc(groupRef, {
+        batch.update(groupRef, {
           adminIds: arrayUnion(member.id),
         });
+
+        const groupUserIds = group.userIds || [];
+
+        for (const userId of groupUserIds) {
+          batch.update(doc(db, "users", userId), {
+            adminIds: arrayUnion(member.id),
+          });
+        }
+
+        const taskQuery = query(
+          collection(db, "tasks"),
+          where("groupId", "==", selectedGroup)
+        );
+
+        const taskSnap = await getDocs(taskQuery);
+
+        for (const task of taskSnap.docs) {
+          batch.update(task.ref, {
+            visibleToAdminIds: arrayUnion(member.id),
+          });
+        }
       } else {
-        await updateDoc(groupRef, {
+        batch.update(groupRef, {
           userIds: arrayUnion(member.id),
+        });
+
+        const adminIds = group.adminIds || [];
+
+        batch.update(doc(db, "users", member.id), {
+          adminIds: arrayUnion(...adminIds),
         });
       }
 
-      if (auth.currentUser) {
-        await loadData(auth.currentUser.uid);
-      }
+      await batch.commit();
+
+      await loadData(auth.currentUser.uid);
 
       setSelectedMember("");
-      setMessage("Member added to group.");
+      setMessage("Member added and group access updated.");
     } catch {
       setMessage("Unable to add member to group.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -179,7 +217,7 @@ export default function GroupsPage() {
         </h1>
 
         <p className="mt-1 text-slate-500">
-          Create groups and organize Admins and Users.
+          Create groups and manage shared Admin and User access.
         </p>
       </div>
 
@@ -225,7 +263,9 @@ export default function GroupsPage() {
             <div className="mt-5 space-y-4">
               <select
                 value={selectedGroup}
-                onChange={(e) => setSelectedGroup(e.target.value)}
+                onChange={(e) =>
+                  setSelectedGroup(e.target.value)
+                }
                 className="w-full rounded-xl border border-slate-300 px-4 py-3"
               >
                 <option value="">Select Group</option>
@@ -261,9 +301,10 @@ export default function GroupsPage() {
 
               <button
                 onClick={addMemberToGroup}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+                disabled={saving}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
               >
-                Add Member
+                {saving ? "Updating..." : "Add Member"}
               </button>
             </div>
           </div>
@@ -306,8 +347,8 @@ export default function GroupsPage() {
                   </div>
 
                   <div className="mt-4 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-                    Admins in this group can share relevant group
-                    information and tasks.
+                    Admins in this group share the group&apos;s
+                    relevant users and tasks.
                   </div>
                 </div>
               ))}
