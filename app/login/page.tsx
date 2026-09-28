@@ -7,6 +7,8 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../../lib/firebase";
 import { useRouter } from "next/navigation";
 
+const SUPER_ADMIN_EMAIL = "labpc4308077@gmail.com";
+
 export default function LoginPage() {
 const router = useRouter();
 
@@ -31,6 +33,18 @@ try {
     password
   );
 
+  const loggedInEmail =
+    credential.user.email?.trim().toLowerCase() || "";
+
+  /*
+   * Super Admin is identified by the dedicated email.
+   * Firestore role can remain "admin".
+   */
+  if (loggedInEmail === SUPER_ADMIN_EMAIL.toLowerCase()) {
+    router.replace("/super-admin");
+    return;
+  }
+
   const snap = await getDoc(
     doc(db, "users", credential.user.uid)
   );
@@ -38,7 +52,7 @@ try {
   if (!snap.exists()) {
     await auth.signOut();
     setError(
-      "Firebase login succeeded, but your Firestore user profile was not found."
+      "Your account profile was not found."
     );
     return;
   }
@@ -46,25 +60,29 @@ try {
   const role = snap.data().role;
 
   if (role === "user") {
-    router.push("/user-dashboard");
+    router.replace("/user-dashboard");
+  } else if (role === "admin") {
+    router.replace("/dashboard");
   } else {
-    router.push("/dashboard");
+    await auth.signOut();
+    setError(
+      "Your account role is not configured correctly."
+    );
   }
 } catch (err: any) {
   console.error("Firebase Login Error:", err);
 
   const code = err?.code || "";
 
-  if (code === "auth/invalid-credential") {
-    setError(
-      "Firebase says the email or password is incorrect. Please verify the password in Authentication → Users."
-    );
-  } else if (code === "auth/wrong-password") {
-    setError("Firebase says the password is incorrect.");
+  if (
+    code === "auth/invalid-credential" ||
+    code === "auth/wrong-password"
+  ) {
+    setError("Invalid email or password.");
   } else if (code === "auth/user-not-found") {
-    setError("Firebase cannot find this email account.");
+    setError("No account was found with this email.");
   } else if (code === "auth/invalid-email") {
-    setError("The email address format is invalid.");
+    setError("Please enter a valid email address.");
   } else if (code === "auth/operation-not-allowed") {
     setError(
       "Email/Password login is not enabled in Firebase Authentication."
@@ -72,6 +90,10 @@ try {
   } else if (code === "auth/network-request-failed") {
     setError(
       "Network connection failed. Please check your internet connection."
+    );
+  } else if (code === "permission-denied") {
+    setError(
+      "Login succeeded, but Firestore access was denied. Please check your Firestore Rules."
     );
   } else {
     setError(
@@ -87,10 +109,11 @@ try {
 return (
 <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-10">
 <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-<div className="mb-8 text-center">
-<h1 className="text-3xl font-bold text-slate-900">
-Welcome Back
-</h1>
+
+    <div className="mb-8 text-center">
+      <h1 className="text-3xl font-bold text-slate-900">
+        Welcome Back
+      </h1>
 
       <p className="mt-2 text-sm text-slate-500">
         Sign in to your Task Manager account
@@ -103,7 +126,10 @@ Welcome Back
       </div>
     )}
 
-    <form onSubmit={handleLogin} className="space-y-5">
+    <form
+      onSubmit={handleLogin}
+      className="space-y-5"
+    >
       <div>
         <label className="mb-2 block text-sm font-medium text-slate-700">
           Email
@@ -114,7 +140,9 @@ Welcome Back
           type="email"
           autoComplete="email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) =>
+            setEmail(e.target.value)
+          }
           placeholder="Enter your email"
           className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
         />
@@ -128,10 +156,16 @@ Welcome Back
         <div className="relative">
           <input
             required
-            type={showPassword ? "text" : "password"}
+            type={
+              showPassword
+                ? "text"
+                : "password"
+            }
             autoComplete="current-password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) =>
+              setPassword(e.target.value)
+            }
             placeholder="Enter your password"
             className="w-full rounded-xl border border-slate-300 px-4 py-3 pr-20 outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
           />
@@ -143,7 +177,9 @@ Welcome Back
             }
             className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-500"
           >
-            {showPassword ? "Hide" : "Show"}
+            {showPassword
+              ? "Hide"
+              : "Show"}
           </button>
         </div>
       </div>
@@ -167,7 +203,9 @@ Welcome Back
         disabled={loading}
         className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
       >
-        {loading ? "Signing In..." : "Login"}
+        {loading
+          ? "Signing In..."
+          : "Login"}
       </button>
     </form>
 
