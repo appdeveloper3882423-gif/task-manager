@@ -1,86 +1,98 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import {
-collection,
-getDocs,
-query,
-where,
-} from "firebase/firestore";
-import { auth, db } from "../../../lib/firebase";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, getDocs } from "firebase/firestore";
+import { auth, db } from "../../lib/firebase";
+import { useRouter } from "next/navigation";
 
-type AdminItem = {
-id: string;
-name: string;
-email: string;
-role: string;
-status: string;
-createdAt: any;
-};
+const SUPER_ADMIN_EMAIL = "superadmin59@gmail.com";
 
-export default function SuperAdminAdminsPage() {
+export default function SuperAdminPage() {
 const router = useRouter();
 
-const [admins, setAdmins] = useState<AdminItem[]>([]);
+const [admins, setAdmins] = useState(0);
+const [users, setUsers] = useState(0);
+const [groups, setGroups] = useState(0);
+const [tasks, setTasks] = useState(0);
+
 const [loading, setLoading] = useState(true);
 const [error, setError] = useState("");
-
-async function loadAdmins() {
-try {
-setLoading(true);
-setError("");
-
-  const q = query(
-    collection(db, "users"),
-    where("role", "==", "admin")
-  );
-
-  const snapshot = await getDocs(q);
-
-  const list: AdminItem[] = [];
-
-  snapshot.forEach((document) => {
-    const data = document.data();
-
-    list.push({
-      id: document.id,
-      name: data.name || "Unnamed Admin",
-      email: data.email || "",
-      role: data.role || "admin",
-      status: data.status || "active",
-      createdAt: data.createdAt || null,
-    });
-  });
-
-  setAdmins(list);
-} catch (err: any) {
-  console.error(
-    "Manage Admins Error:",
-    err
-  );
-
-  setError(
-    "Unable to load Admin accounts."
-  );
-} finally {
-  setLoading(false);
-}
-
-}
 
 useEffect(() => {
 const unsubscribe = onAuthStateChanged(
 auth,
-(user) => {
+async (user) => {
 if (!user) {
 router.replace("/login");
 return;
 }
 
-    loadAdmins();
+    const loggedInEmail =
+      user.email?.trim().toLowerCase() || "";
+
+    if (
+      loggedInEmail !==
+      SUPER_ADMIN_EMAIL.toLowerCase()
+    ) {
+      router.replace("/dashboard");
+      return;
+    }
+
+    try {
+      setError("");
+
+      const usersSnap = await getDocs(
+        collection(db, "users")
+      );
+
+      const groupsSnap = await getDocs(
+        collection(db, "groups")
+      );
+
+      const tasksSnap = await getDocs(
+        collection(db, "tasks")
+      );
+
+      let adminCount = 0;
+      let userCount = 0;
+
+      usersSnap.forEach((item) => {
+        const data = item.data();
+
+        if (data.role === "admin") {
+          adminCount++;
+        }
+
+        if (data.role === "user") {
+          userCount++;
+        }
+      });
+
+      setAdmins(adminCount);
+      setUsers(userCount);
+      setGroups(groupsSnap.size);
+      setTasks(tasksSnap.size);
+    } catch (err: any) {
+      console.error(
+        "SUPER ADMIN FIRESTORE ERROR:",
+        err
+      );
+
+      const code =
+        err?.code || "unknown";
+
+      const message =
+        err?.message ||
+        "Unknown Firestore error.";
+
+      setError(
+        `Firestore Error: ${code} — ${message}`
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 );
 
@@ -88,186 +100,159 @@ return () => unsubscribe();
 
 }, [router]);
 
-function formatDate(value: any) {
-if (!value) {
-return "—";
-}
-
-try {
-  if (
-    typeof value.toDate === "function"
-  ) {
-    return value
-      .toDate()
-      .toLocaleString();
-  }
-
-  return "—";
-} catch {
-  return "—";
-}
-
-}
-
 return (
 <main className="min-h-screen bg-slate-50">
-<header className="border-b bg-white">
-<div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-5 md:px-8">
-<div>
-<h1 className="text-2xl font-bold text-slate-900">
-Manage Admins
-</h1>
+
+  <header className="border-b bg-white">
+    <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-5 md:px-8">
+
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">
+          Super Admin
+        </h1>
 
         <p className="mt-1 text-sm text-slate-500">
-          View all registered Admin accounts.
+          System-wide administration
         </p>
       </div>
 
       <Link
-        href="/super-admin"
+        href="/super-admin/admins"
         className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white"
       >
-        Super Admin
+        Manage Admins
       </Link>
+
     </div>
   </header>
 
   <section className="mx-auto max-w-7xl p-5 md:p-8">
 
     {error && (
-      <div className="mb-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-        {error}
+      <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-5">
+        <p className="font-semibold text-red-700">
+          Unable to load system data
+        </p>
+
+        <p className="mt-2 break-words text-sm leading-6 text-red-600">
+          {error}
+        </p>
       </div>
     )}
 
-    <div className="mb-6 grid gap-5 sm:grid-cols-2">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm text-slate-500">
-          Total Admins
-        </p>
+    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
 
-        <p className="mt-2 text-3xl font-bold text-slate-900">
-          {loading ? "..." : admins.length}
-        </p>
-      </div>
+      <Stat
+        title="Total Admins"
+        value={admins}
+        loading={loading}
+      />
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-sm text-slate-500">
-          Active Admins
-        </p>
+      <Stat
+        title="Total Users"
+        value={users}
+        loading={loading}
+      />
 
-        <p className="mt-2 text-3xl font-bold text-slate-900">
-          {loading
-            ? "..."
-            : admins.filter(
-                (admin) =>
-                  admin.status === "active"
-              ).length}
-        </p>
-      </div>
+      <Stat
+        title="Total Groups"
+        value={groups}
+        loading={loading}
+      />
+
+      <Stat
+        title="Total Tasks"
+        value={tasks}
+        loading={loading}
+      />
+
     </div>
 
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="mt-8 grid gap-5 md:grid-cols-2">
 
-      <div className="flex flex-col gap-4 border-b p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">
-            Admin Accounts
-          </h2>
+      <Card
+        title="Manage Admins"
+        description="View all Admin accounts registered in the system."
+        href="/super-admin/admins"
+      />
 
-          <p className="mt-1 text-sm text-slate-500">
-            All Admin accounts created through registration.
-          </p>
-        </div>
+      <Card
+        title="Manage Groups"
+        description="View and manage system groups."
+        href="/dashboard/groups"
+      />
 
-        <button
-          onClick={loadAdmins}
-          disabled={loading}
-          className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
-        >
-          {loading
-            ? "Loading..."
-            : "Refresh"}
-        </button>
-      </div>
+      <Card
+        title="System Users"
+        description="View users across the system."
+        href="/dashboard/users"
+      />
 
-      {loading ? (
-        <div className="p-10 text-center text-sm text-slate-500">
-          Loading Admin accounts...
-        </div>
-      ) : admins.length === 0 ? (
-        <div className="p-10 text-center">
-          <p className="font-medium text-slate-700">
-            No Admin accounts found.
-          </p>
+      <Card
+        title="System Tasks"
+        description="View and manage system tasks."
+        href="/dashboard/tasks"
+      />
 
-          <p className="mt-1 text-sm text-slate-500">
-            New Admin registrations will appear here.
-          </p>
-        </div>
-      ) : (
-        <div className="divide-y">
-          {admins.map(
-            (admin, index) => (
-              <div
-                key={admin.id}
-                className="p-6"
-              >
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-
-                  <div className="flex min-w-0 items-start gap-4">
-
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">
-                      {admin.name
-                        .charAt(0)
-                        .toUpperCase()}
-                    </div>
-
-                    <div className="min-w-0">
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-semibold text-slate-900">
-                          {admin.name}
-                        </h3>
-
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                          Admin #{index + 1}
-                        </span>
-                      </div>
-
-                      <p className="mt-1 break-all text-sm text-slate-500">
-                        {admin.email}
-                      </p>
-
-                      <p className="mt-2 break-all text-xs text-slate-400">
-                        UID: {admin.id}
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-400">
-                        Registered:{" "}
-                        {formatDate(
-                          admin.createdAt
-                        )}
-                      </p>
-
-                    </div>
-                  </div>
-
-                  <div>
-                    <span className="rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
-                      {admin.status}
-                    </span>
-                  </div>
-
-                </div>
-              </div>
-            )
-          )}
-        </div>
-      )}
     </div>
+
   </section>
 </main>
+
+);
+}
+
+function Stat({
+title,
+value,
+loading,
+}: {
+title: string;
+value: number;
+loading: boolean;
+}) {
+return (
+<div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+
+  <p className="text-sm text-slate-500">
+    {title}
+  </p>
+
+  <p className="mt-2 text-3xl font-bold text-slate-900">
+    {loading ? "..." : value}
+  </p>
+
+</div>
+
+);
+}
+
+function Card({
+title,
+description,
+href,
+}: {
+title: string;
+description: string;
+href: string;
+}) {
+return (
+<Link
+href={href}
+className="block rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+>
+<h2 className="text-lg font-bold text-slate-900">
+{title}
+</h2>
+
+  <p className="mt-2 text-sm leading-6 text-slate-500">
+    {description}
+  </p>
+
+  <div className="mt-5 text-sm font-semibold text-slate-900">
+    Open →
+  </div>
+</Link>
 
 );
 }
