@@ -7,15 +7,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isSuperAdmin() {
+      return signedIn()
+        && request.auth.uid == "3awXBqEMFhXt3QHafTiP3y2buAx2";
+    }
+
     function userDoc() {
       return get(
         /databases/$(database)/documents/users/$(request.auth.uid)
       );
-    }
-
-    function isSuperAdmin() {
-      return signedIn()
-        && request.auth.token.email == "labpc4308077@gmail.com";
     }
 
     function isAdmin() {
@@ -49,7 +49,17 @@ service cloud.firestore {
         ).data.adminIds;
     }
 
+
+    // USERS
     match /users/{userId} {
+
+      allow read: if
+        isSuperAdmin()
+        || isOwner(userId)
+        || (
+          isAdmin()
+          && request.auth.uid in resource.data.adminIds
+        );
 
       allow create: if
         isSuperAdmin()
@@ -61,43 +71,34 @@ service cloud.firestore {
           && request.auth.uid in request.resource.data.adminIds
         )
         ||
-        isOwner(userId);
-
-      allow read: if
-        isSuperAdmin()
-        ||
-        isOwner(userId)
-        ||
         (
-          isAdmin()
-          && request.auth.uid in resource.data.adminIds
+          isOwner(userId)
+          && request.resource.data.role == "admin"
         );
 
       allow update: if
         isSuperAdmin()
-        ||
-        isOwner(userId)
-        ||
-        (
+        || isOwner(userId)
+        || (
           isAdmin()
           && request.auth.uid in resource.data.adminIds
         );
 
       allow delete: if
         isSuperAdmin()
-        ||
-        (
+        || (
           isAdmin()
           && request.auth.uid in resource.data.adminIds
         );
     }
 
+
+    // GROUPS
     match /groups/{groupId} {
 
       allow read: if
         isSuperAdmin()
-        ||
-        isGroupAdmin(groupId);
+        || isGroupAdmin(groupId);
 
       allow create: if
         isSuperAdmin()
@@ -110,28 +111,28 @@ service cloud.firestore {
 
       allow update: if
         isSuperAdmin()
-        ||
-        isGroupAdmin(groupId);
+        || isGroupAdmin(groupId);
 
       allow delete: if
         isSuperAdmin()
-        ||
-        isGroupAdmin(groupId);
+        || isGroupAdmin(groupId);
     }
 
+
+    // GROUP MEMBERS
     match /groupMembers/{memberId} {
 
       allow read: if
         isSuperAdmin()
-        ||
-        isAdmin();
+        || isAdmin();
 
       allow create, update, delete: if
         isSuperAdmin()
-        ||
-        isAdmin();
+        || isAdmin();
     }
 
+
+    // TASKS
     match /tasks/{taskId} {
 
       allow read: if
@@ -152,10 +153,8 @@ service cloud.firestore {
         ||
         (
           isAdmin()
-          &&
-          request.auth.uid in request.resource.data.visibleToAdminIds
-          &&
-          request.resource.data.assignedBy == request.auth.uid
+          && request.auth.uid in request.resource.data.visibleToAdminIds
+          && request.resource.data.assignedBy == request.auth.uid
         );
 
       allow update: if
@@ -176,8 +175,7 @@ service cloud.firestore {
         ||
         (
           isAdmin()
-          &&
-          request.auth.uid in resource.data.visibleToAdminIds
+          && request.auth.uid in resource.data.visibleToAdminIds
         );
     }
   }
