@@ -2,14 +2,20 @@
 
 import { useEffect, useState } from "react";
 import {
-  addDoc,
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+} from "firebase/auth";
+import { initializeApp, getApps } from "firebase/app";
+import {
   collection,
+  doc,
   getDocs,
-  query,
   serverTimestamp,
+  setDoc,
+  query,
   where,
 } from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../../../lib/firebase";
 
 type UserItem = {
@@ -17,13 +23,23 @@ type UserItem = {
   name: string;
   email: string;
   status?: string;
-  adminIds?: string[];
+};
+
+const firebaseConfig = {
+  apiKey: "AIzaSyA__VCR9IGqmFxjSk0e3pcu5dh6IRdzNr0",
+  authDomain: "task-6ced7.firebaseapp.com",
+  projectId: "task-6ced7",
+  storageBucket: "task-6ced7.firebasestorage.app",
+  messagingSenderId: "693208081052",
+  appId: "1:693208081052:web:1e8336dca22b53d9e80359",
 };
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -41,7 +57,7 @@ export default function UsersPage() {
       ...item.data(),
     })) as UserItem[];
 
-    setUsers(data);
+    setUsers(data.filter((item) => item.id !== adminId));
   }
 
   useEffect(() => {
@@ -63,7 +79,12 @@ export default function UsersPage() {
   async function addUser(e: React.FormEvent) {
     e.preventDefault();
 
-    if (!name.trim() || !email.trim() || !auth.currentUser) return;
+    if (!name.trim() || !email.trim() || password.length < 6) {
+      setMessage("Enter all fields. Password must be at least 6 characters.");
+      return;
+    }
+
+    if (!auth.currentUser) return;
 
     setSaving(true);
     setMessage("");
@@ -71,13 +92,25 @@ export default function UsersPage() {
     try {
       const adminId = auth.currentUser.uid;
 
-      await addDoc(collection(db, "users"), {
+      const secondaryApp =
+        getApps().find((app) => app.name === "UserCreator") ||
+        initializeApp(firebaseConfig, "UserCreator");
+
+      const secondaryAuth = getAuth(secondaryApp);
+
+      const credential = await createUserWithEmailAndPassword(
+        secondaryAuth,
+        email.trim().toLowerCase(),
+        password
+      );
+
+      await setDoc(doc(db, "users", credential.user.uid), {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         role: "user",
         status: "active",
-        createdBy: adminId,
         adminIds: [adminId],
+        createdBy: adminId,
         createdAt: serverTimestamp(),
       });
 
@@ -85,11 +118,17 @@ export default function UsersPage() {
 
       setName("");
       setEmail("");
-      setMessage(
-        "User profile created. The user can register using this email."
-      );
-    } catch {
-      setMessage("Unable to create user.");
+      setPassword("");
+
+      setMessage("User account created successfully.");
+    } catch (err: any) {
+      if (err?.code === "auth/email-already-in-use") {
+        setMessage("This email already has an account.");
+      } else if (err?.code === "auth/weak-password") {
+        setMessage("Password must be at least 6 characters.");
+      } else {
+        setMessage("Unable to create user.");
+      }
     } finally {
       setSaving(false);
     }
@@ -100,7 +139,7 @@ export default function UsersPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-900">Users</h1>
         <p className="mt-1 text-slate-500">
-          Manage users and their access.
+          Create and manage users.
         </p>
       </div>
 
@@ -113,13 +152,8 @@ export default function UsersPage() {
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-bold text-slate-900">
-            Add User
+            Create User
           </h2>
-
-          <p className="mt-2 text-xs leading-5 text-slate-500">
-            This creates the user profile. The user will still need to
-            create their Firebase login account.
-          </p>
 
           <form onSubmit={addUser} className="mt-5 space-y-4">
             <input
@@ -139,11 +173,21 @@ export default function UsersPage() {
               className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
             />
 
+            <input
+              required
+              type="password"
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Temporary Password"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+            />
+
             <button
               disabled={saving}
               className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-50"
             >
-              {saving ? "Creating..." : "Add User"}
+              {saving ? "Creating..." : "Create User"}
             </button>
           </form>
         </div>
