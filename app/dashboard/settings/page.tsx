@@ -1,16 +1,35 @@
 "use client";
 
 import { useState } from "react";
+import { signOut } from "firebase/auth";
+import { useRouter } from "next/navigation";
+import { auth } from "../../../lib/firebase";
 
 export default function SettingsPage() {
+  const router = useRouter();
+
   const [notifications, setNotifications] = useState(true);
   const [emailUpdates, setEmailUpdates] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+
+    try {
+      await signOut(auth);
+      router.replace("/login");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
 
   return (
-    <main className="min-h-screen bg-slate-50 p-5 md:p-8">
+    <main className="p-5 md:p-8">
       <div className="mx-auto max-w-3xl">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900">Settings</h1>
+          <h1 className="text-3xl font-bold text-slate-900">
+            Settings
+          </h1>
           <p className="mt-1 text-slate-500">
             Manage your application preferences.
           </p>
@@ -38,8 +57,12 @@ export default function SettingsPage() {
               Sign out from this account on the current device.
             </p>
 
-            <button className="mt-5 rounded-xl border border-red-200 px-5 py-3 font-semibold text-red-600 hover:bg-red-50">
-              Logout
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="mt-5 rounded-xl border border-red-200 px-5 py-3 font-semibold text-red-600 disabled:opacity-50"
+            >
+              {loggingOut ? "Logging Out..." : "Logout"}
             </button>
           </div>
         </div>
@@ -63,19 +86,20 @@ function Setting({
     <div className="flex items-center justify-between gap-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div>
         <h2 className="font-bold text-slate-900">{title}</h2>
-        <p className="mt-1 text-sm text-slate-500">{description}</p>
+        <p className="mt-1 text-sm text-slate-500">
+          {description}
+        </p>
       </div>
 
       <button
         type="button"
         onClick={() => onChange(!enabled)}
-        className={`relative h-7 w-12 rounded-full transition ${
+        className={`relative h-7 w-12 shrink-0 rounded-full ${
           enabled ? "bg-slate-900" : "bg-slate-300"
         }`}
-        aria-label={title}
       >
         <span
-          className={`absolute top-1 h-5 w-5 rounded-full bg-white transition ${
+          className={`absolute top-1 h-5 w-5 rounded-full bg-white ${
             enabled ? "left-6" : "left-1"
           }`}
         />
