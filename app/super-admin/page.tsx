@@ -2,50 +2,42 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { collection, getDocs } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
-import {
-  collection,
-  getDocs,
-} from "firebase/firestore";
 import { auth, db } from "../../lib/firebase";
 import { useRouter } from "next/navigation";
 
-const SUPER_ADMIN_EMAIL = "labpc4308077@gmail.com";
 const SUPER_ADMIN_UID = "3awXBqEMFhXt3QHafTiP3y2buAx2";
 
-type TestResult = {
+type AdminItem = {
+  id: string;
   name: string;
-  status: "testing" | "success" | "failed";
-  message: string;
-  count?: number;
+  email: string;
+  status?: string;
+  createdAt?: any;
+};
+
+type ActivityItem = {
+  type: string;
+  title: string;
+  detail: string;
+  date?: any;
 };
 
 export default function SuperAdminPage() {
   const router = useRouter();
 
-  const [checking, setChecking] = useState(true);
-  const [loggedInEmail, setLoggedInEmail] = useState("");
-  const [loggedInUid, setLoggedInUid] = useState("");
+  const [admins, setAdmins] = useState(0);
+  const [users, setUsers] = useState(0);
+  const [groups, setGroups] = useState(0);
+  const [tasks, setTasks] = useState(0);
 
-  const [tests, setTests] = useState<TestResult[]>([
-    {
-      name: "Users",
-      status: "testing",
-      message: "Waiting...",
-    },
-    {
-      name: "Groups",
-      status: "testing",
-      message: "Waiting...",
-    },
-    {
-      name: "Tasks",
-      status: "testing",
-      message: "Waiting...",
-    },
-  ]);
+  const [adminList, setAdminList] = useState<AdminItem[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
 
-  const [overallError, setOverallError] = useState("");
+  const [name, setName] = useState("Super Admin");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
@@ -56,274 +48,577 @@ export default function SuperAdminPage() {
           return;
         }
 
-        const email =
-          user.email?.trim().toLowerCase() || "";
-
-        setLoggedInEmail(email);
-        setLoggedInUid(user.uid);
-
         if (user.uid !== SUPER_ADMIN_UID) {
-          setOverallError(
-            `This account is not the configured Super Admin account. Logged in UID: ${user.uid}`
-          );
-          setChecking(false);
+          router.replace("/dashboard");
           return;
         }
 
-        await testFirestoreCollection("Users", "users");
-        await testFirestoreCollection("Groups", "groups");
-        await testFirestoreCollection("Tasks", "tasks");
+        setName(
+          user.displayName ||
+            "Super Admin"
+        );
 
-        setChecking(false);
+        await loadSystemData();
       }
     );
 
     return () => unsubscribe();
   }, [router]);
 
-  async function testFirestoreCollection(
-    name: string,
-    collectionName: string
-  ) {
-    try {
-      const snapshot = await getDocs(
-        collection(db, collectionName)
-      );
+  async function loadSystemData() {
+    setLoading(true);
+    setError("");
 
-      setTests((current) =>
-        current.map((item) =>
-          item.name === name
-            ? {
-                ...item,
-                status: "success",
-                message: "Read successful.",
-                count: snapshot.size,
-              }
-            : item
-        )
-      );
+    try {
+      const [
+        usersSnap,
+        groupsSnap,
+        tasksSnap,
+      ] = await Promise.all([
+        getDocs(collection(db, "users")),
+        getDocs(collection(db, "groups")),
+        getDocs(collection(db, "tasks")),
+      ]);
+
+      let adminCount = 0;
+      let userCount = 0;
+
+      const loadedAdmins: AdminItem[] = [];
+
+      usersSnap.docs.forEach((item) => {
+        const data = item.data();
+
+        if (data.role === "admin") {
+          adminCount++;
+
+          loadedAdmins.push({
+            id: item.id,
+            name:
+              data.name ||
+              "Unnamed Admin",
+            email:
+              data.email || "",
+            status:
+              data.status ||
+              "active",
+            createdAt:
+              data.createdAt ||
+              null,
+          });
+        }
+
+        if (data.role === "user") {
+          userCount++;
+        }
+      });
+
+      setAdmins(adminCount);
+      setUsers(userCount);
+      setGroups(groupsSnap.size);
+      setTasks(tasksSnap.size);
+      setAdminList(loadedAdmins);
+
+      const recentActivities: ActivityItem[] =
+        [];
+
+      loadedAdmins
+        .filter((item) => item.createdAt)
+        .sort((a, b) => {
+          const aTime =
+            a.createdAt?.toMillis?.() || 0;
+
+          const bTime =
+            b.createdAt?.toMillis?.() || 0;
+
+          return bTime - aTime;
+        })
+        .slice(0, 5)
+        .forEach((admin) => {
+          recentActivities.push({
+            type: "Admin",
+            title: "New Admin registered",
+            detail: `${admin.name} • ${admin.email}`,
+            date: admin.createdAt,
+          });
+        });
+
+      setActivities(recentActivities);
     } catch (err: any) {
       console.error(
-        `${name} Firestore Error:`,
+        "Super Admin Dashboard Error:",
         err
       );
 
-      setTests((current) =>
-        current.map((item) =>
-          item.name === name
-            ? {
-                ...item,
-                status: "failed",
-                message: `${err?.code || "unknown-error"} — ${
-                  err?.message ||
-                  "Missing or insufficient permissions."
-                }`,
-              }
-            : item
-        )
+      setError(
+        `Unable to load system data${
+          err?.code
+            ? ` (${err.code})`
+            : ""
+        }.`
       );
+    } finally {
+      setLoading(false);
     }
   }
 
-  function statusClass(status: TestResult["status"]) {
-    if (status === "success") {
-      return "bg-green-50 text-green-700";
-    }
+  function formatDate(value: any) {
+    if (!value) return "—";
 
-    if (status === "failed") {
-      return "bg-red-50 text-red-700";
-    }
+    try {
+      if (
+        typeof value.toDate ===
+        "function"
+      ) {
+        return value
+          .toDate()
+          .toLocaleString();
+      }
 
-    return "bg-slate-100 text-slate-600";
+      return "—";
+    } catch {
+      return "—";
+    }
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="p-5 md:p-8">
 
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-5 md:px-8">
+      {/* Page Header */}
+      <div className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
 
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Task Manager
-            </p>
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+            System Overview
+          </p>
 
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">
-              Super Admin
-            </h1>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
+            Super Admin Dashboard
+          </h1>
 
-            <p className="mt-1 text-sm text-slate-500">
-              System administration and security diagnostics
-            </p>
-          </div>
+          <p className="mt-2 text-sm text-slate-500">
+            Welcome back, {name}. Manage the complete Task Manager system from one place.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+
+          <button
+            type="button"
+            onClick={loadSystemData}
+            disabled={loading}
+            className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+          >
+            {loading
+              ? "Refreshing..."
+              : "Refresh Data"}
+          </button>
 
           <Link
-            href="/login"
-            className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            href="/super-admin/admins"
+            className="rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
           >
-            Login
+            Manage Admins
           </Link>
 
         </div>
-      </header>
 
-      <section className="mx-auto max-w-5xl p-5 md:p-8">
+      </div>
 
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 
-          <h2 className="text-lg font-bold text-slate-900">
-            Super Admin Authentication
+      {/* Error */}
+      {error && (
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5">
+
+          <p className="font-semibold text-red-700">
+            System Data Error
+          </p>
+
+          <p className="mt-1 break-words text-sm text-red-600">
+            {error}
+          </p>
+
+        </div>
+      )}
+
+
+      {/* Main Statistics */}
+      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+
+        <SystemCard
+          title="Total Admins"
+          value={admins}
+          description="Administrator accounts"
+          icon="♙"
+          loading={loading}
+          href="/super-admin/admins"
+        />
+
+        <SystemCard
+          title="Total Users"
+          value={users}
+          description="User accounts"
+          icon="♟"
+          loading={loading}
+          href="/super-admin/users"
+        />
+
+        <SystemCard
+          title="Total Groups"
+          value={groups}
+          description="Admin and User groups"
+          icon="◫"
+          loading={loading}
+          href="/super-admin/groups"
+        />
+
+        <SystemCard
+          title="Total Tasks"
+          value={tasks}
+          description="Tasks across the system"
+          icon="✓"
+          loading={loading}
+          href="/super-admin/tasks"
+        />
+
+      </div>
+
+
+      {/* Management Cards */}
+      <div className="mt-8">
+
+        <div className="mb-4">
+          <h2 className="text-lg font-bold text-slate-950">
+            System Management
           </h2>
 
-          <div className="mt-5 space-y-3 text-sm">
+          <p className="mt-1 text-sm text-slate-500">
+            Access and manage every major part of the application.
+          </p>
+        </div>
 
-            <div className="flex flex-col gap-1 rounded-xl bg-slate-50 p-4">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Logged In Email
-              </span>
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
 
-              <span className="break-all font-medium text-slate-900">
-                {loggedInEmail || "Checking..."}
-              </span>
+          <ManagementCard
+            title="Admins"
+            description="View all administrator accounts and registration information."
+            href="/super-admin/admins"
+            icon="♙"
+          />
+
+          <ManagementCard
+            title="Groups"
+            description="View and manage groups across the entire system."
+            href="/super-admin/groups"
+            icon="◫"
+          />
+
+          <ManagementCard
+            title="Users"
+            description="View users and their system relationships."
+            href="/super-admin/users"
+            icon="♟"
+          />
+
+          <ManagementCard
+            title="Tasks"
+            description="View tasks created throughout the application."
+            href="/super-admin/tasks"
+            icon="✓"
+          />
+
+        </div>
+
+      </div>
+
+
+      {/* Lower Dashboard */}
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+
+        {/* Recent Admins */}
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+
+          <div className="flex items-center justify-between border-b p-6">
+
+            <div>
+              <h2 className="text-lg font-bold text-slate-950">
+                Recent Admin Registrations
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Latest administrator accounts.
+              </p>
             </div>
 
-            <div className="flex flex-col gap-1 rounded-xl bg-slate-50 p-4">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Logged In UID
-              </span>
-
-              <span className="break-all font-medium text-slate-900">
-                {loggedInUid || "Checking..."}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1 rounded-xl bg-slate-50 p-4">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Configured Super Admin UID
-              </span>
-
-              <span className="break-all font-medium text-slate-900">
-                {SUPER_ADMIN_UID}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-1 rounded-xl bg-slate-50 p-4">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Configured Super Admin Email
-              </span>
-
-              <span className="break-all font-medium text-slate-900">
-                {SUPER_ADMIN_EMAIL}
-              </span>
-            </div>
+            <Link
+              href="/super-admin/admins"
+              className="text-sm font-semibold text-slate-900 hover:underline"
+            >
+              View All
+            </Link>
 
           </div>
 
-          {loggedInUid && (
-            <div
-              className={`mt-5 rounded-xl px-4 py-3 text-sm font-medium ${
-                loggedInUid === SUPER_ADMIN_UID
-                  ? "bg-green-50 text-green-700"
-                  : "bg-red-50 text-red-700"
-              }`}
-            >
-              {loggedInUid === SUPER_ADMIN_UID
-                ? "Super Admin UID verified."
-                : "Super Admin UID does not match."}
+          {loading ? (
+            <div className="p-8 text-center text-sm text-slate-500">
+              Loading...
+            </div>
+          ) : adminList.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-500">
+              No Admin accounts found.
+            </div>
+          ) : (
+            <div className="divide-y">
+
+              {adminList
+                .slice(0, 5)
+                .map((admin) => (
+                  <div
+                    key={admin.id}
+                    className="flex items-center gap-4 p-5"
+                  >
+
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-950 text-sm font-bold text-white">
+                      {admin.name
+                        .charAt(0)
+                        .toUpperCase() ||
+                        "A"}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+
+                      <p className="truncate font-semibold text-slate-900">
+                        {admin.name}
+                      </p>
+
+                      <p className="truncate text-sm text-slate-500">
+                        {admin.email}
+                      </p>
+
+                    </div>
+
+                    <div className="hidden text-right sm:block">
+
+                      <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700">
+                        {admin.status ||
+                          "active"}
+                      </span>
+
+                      <p className="mt-2 text-[11px] text-slate-400">
+                        {formatDate(
+                          admin.createdAt
+                        )}
+                      </p>
+
+                    </div>
+
+                  </div>
+                ))}
+
             </div>
           )}
 
         </div>
 
-        {overallError && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5">
-            <h2 className="font-bold text-red-700">
-              Authentication Error
-            </h2>
 
-            <p className="mt-2 break-all text-sm leading-6 text-red-600">
-              {overallError}
-            </p>
-          </div>
-        )}
-
+        {/* Activity */}
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
 
           <div className="border-b p-6">
-            <h2 className="text-lg font-bold text-slate-900">
-              Firestore Access Test
+
+            <h2 className="text-lg font-bold text-slate-950">
+              Recent Activity
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              Each collection is tested separately.
+              Recent system events available from current data.
             </p>
+
           </div>
 
-          <div className="divide-y">
+          {loading ? (
+            <div className="p-8 text-center text-sm text-slate-500">
+              Loading...
+            </div>
+          ) : activities.length === 0 ? (
+            <div className="p-8 text-center">
 
-            {tests.map((test) => (
-              <div
-                key={test.name}
-                className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between"
-              >
-
-                <div>
-                  <h3 className="font-semibold text-slate-900">
-                    {test.name}
-                  </h3>
-
-                  <p className="mt-1 break-all text-sm text-slate-500">
-                    {test.message}
-                  </p>
-
-                  {test.status === "success" && (
-                    <p className="mt-1 text-xs text-slate-400">
-                      Documents found: {test.count}
-                    </p>
-                  )}
-                </div>
-
-                <span
-                  className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ${statusClass(
-                    test.status
-                  )}`}
-                >
-                  {test.status === "testing"
-                    ? "Testing..."
-                    : test.status === "success"
-                    ? "Success"
-                    : "Failed"}
-                </span>
-
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-lg">
+                ◷
               </div>
-            ))}
+
+              <p className="mt-4 font-medium text-slate-700">
+                No recent activity.
+              </p>
+
+              <p className="mt-1 text-sm text-slate-500">
+                New system activity will appear here when supported by the stored data.
+              </p>
+
+            </div>
+          ) : (
+            <div className="divide-y">
+
+              {activities.map(
+                (activity, index) => (
+                  <div
+                    key={`${activity.title}-${index}`}
+                    className="flex gap-4 p-5"
+                  >
+
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-sm">
+                      ♙
+                    </div>
+
+                    <div className="min-w-0">
+
+                      <p className="font-semibold text-slate-900">
+                        {activity.title}
+                      </p>
+
+                      <p className="mt-1 break-words text-sm text-slate-500">
+                        {activity.detail}
+                      </p>
+
+                      <p className="mt-2 text-xs text-slate-400">
+                        {formatDate(
+                          activity.date
+                        )}
+                      </p>
+
+                    </div>
+
+                  </div>
+                )
+              )}
+
+            </div>
+          )}
+
+        </div>
+
+      </div>
+
+
+      {/* Security / Access */}
+      <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm">
+
+        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+
+          <div>
+
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
+              Security
+            </p>
+
+            <h2 className="mt-2 text-xl font-bold">
+              Super Admin access is active
+            </h2>
+
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+              You have system-wide access to Admins, Users, Groups and Tasks. Normal Admin accounts continue to use their own restricted dashboard and permissions.
+            </p>
 
           </div>
 
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
-
-          <h2 className="font-bold text-amber-800">
-            Important
-          </h2>
-
-          <p className="mt-2 text-sm leading-6 text-amber-700">
-            This page is temporarily showing detailed Firestore
-            diagnostics. Do not change anything else yet. After the
-            test, we will fix the exact collection that is returning
-            permission-denied.
-          </p>
+          <Link
+            href="/super-admin/settings"
+            className="shrink-0 rounded-xl bg-white px-5 py-3 text-center text-sm font-semibold text-slate-950 hover:bg-slate-100"
+          >
+            System Settings
+          </Link>
 
         </div>
 
-        {checking && (
-          <p className="mt-6 text-center text-sm text-slate-500">
-            Checking Firebase authentication and Firestore access...
-          </p>
-        )}
+      </div>
 
-      </section>
     </main>
   );
 }
+
+
+function SystemCard({
+  title,
+  value,
+  description,
+  icon,
+  loading,
+  href,
+}: {
+  title: string;
+  value: number;
+  description: string;
+  icon: string;
+  loading: boolean;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+    >
+
+      <div className="flex items-start justify-between">
+
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-lg text-slate-900">
+          {icon}
+        </div>
+
+        <span className="text-slate-300 transition group-hover:text-slate-700">
+          →
+        </span>
+
+      </div>
+
+      <p className="mt-6 text-sm font-medium text-slate-500">
+        {title}
+      </p>
+
+      <p className="mt-1 text-3xl font-bold text-slate-950">
+        {loading ? "..." : value}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        {description}
+      </p>
+
+    </Link>
+  );
+}
+
+
+function ManagementCard({
+  title,
+  description,
+  href,
+  icon,
+}: {
+  title: string;
+  description: string;
+  href: string;
+  icon: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
+    >
+
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm text-white">
+        {icon}
+      </div>
+
+      <h3 className="mt-5 font-bold text-slate-950">
+        {title}
+      </h3>
+
+      <p className="mt-2 text-sm leading-6 text-slate-500">
+        {description}
+      </p>
+
+      <div className="mt-5 text-sm font-semibold text-slate-900">
+        Open {title} →
+      </div>
+
+    </Link>
+  );
+              }
