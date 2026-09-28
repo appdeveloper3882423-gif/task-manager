@@ -7,40 +7,67 @@ import {
   getDocs,
   query,
   serverTimestamp,
+  updateDoc,
+  doc,
   where,
+  arrayUnion,
 } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../../../lib/firebase";
 
+type UserItem = {
+  id: string;
+  name: string;
+  email: string;
+};
+
 type GroupItem = {
   id: string;
   name: string;
-  createdBy: string;
   adminIds?: string[];
   userIds?: string[];
 };
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<GroupItem[]>([]);
+  const [users, setUsers] = useState<UserItem[]>([]);
   const [name, setName] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [selectedUser, setSelectedUser] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function loadGroups(adminId: string) {
-    const q = query(
+  async function loadData(adminId: string) {
+    const groupQuery = query(
       collection(db, "groups"),
       where("adminIds", "array-contains", adminId)
     );
 
-    const snap = await getDocs(q);
+    const userQuery = query(
+      collection(db, "users"),
+      where("adminIds", "array-contains", adminId)
+    );
 
-    const data = snap.docs.map((item) => ({
-      id: item.id,
-      ...item.data(),
-    })) as GroupItem[];
+    const [groupSnap, userSnap] = await Promise.all([
+      getDocs(groupQuery),
+      getDocs(userQuery),
+    ]);
 
-    setGroups(data);
+    setGroups(
+      groupSnap.docs.map((item) => ({
+        id: item.id,
+        ...item.data(),
+      })) as GroupItem[]
+    );
+
+    setUsers(
+      userSnap.docs.map((item) => ({
+        id: item.id,
+        ...item.data(),
+      })) as UserItem[]
+    );
   }
 
   useEffect(() => {
@@ -48,7 +75,7 @@ export default function GroupsPage() {
       if (!user) return;
 
       try {
-        await loadGroups(user.uid);
+        await loadData(user.uid);
       } catch {
         setMessage("Unable to load groups.");
       } finally {
@@ -79,7 +106,7 @@ export default function GroupsPage() {
         createdAt: serverTimestamp(),
       });
 
-      await loadGroups(adminId);
+      await loadData(adminId);
 
       setName("");
       setMessage("Group created successfully.");
@@ -90,12 +117,33 @@ export default function GroupsPage() {
     }
   }
 
+  async function addUserToGroup() {
+    if (!selectedGroup || !selectedUser) {
+      setMessage("Select a group and user.");
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, "groups", selectedGroup), {
+        userIds: arrayUnion(selectedUser),
+      });
+
+      if (auth.currentUser) {
+        await loadData(auth.currentUser.uid);
+      }
+
+      setMessage("User added to group.");
+    } catch {
+      setMessage("Unable to add user to group.");
+    }
+  }
+
   return (
     <main className="p-5 md:p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-900">Groups</h1>
         <p className="mt-1 text-slate-500">
-          Create and manage shared groups.
+          Create groups and organize users.
         </p>
       </div>
 
@@ -106,27 +154,70 @@ export default function GroupsPage() {
       )}
 
       <div className="grid gap-8 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-slate-900">
-            Create Group
-          </h2>
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900">
+              Create Group
+            </h2>
 
-          <form onSubmit={createGroup} className="mt-5 space-y-4">
-            <input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Group Name"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
-            />
+            <form onSubmit={createGroup} className="mt-5 space-y-4">
+              <input
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Group Name"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-slate-900"
+              />
 
-            <button
-              disabled={saving}
-              className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-50"
-            >
-              {saving ? "Creating..." : "Create Group"}
-            </button>
-          </form>
+              <button
+                disabled={saving}
+                className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white disabled:opacity-50"
+              >
+                {saving ? "Creating..." : "Create Group"}
+              </button>
+            </form>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-900">
+              Add User
+            </h2>
+
+            <div className="mt-5 space-y-4">
+              <select
+                value={selectedGroup}
+                onChange={(e) => setSelectedGroup(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3"
+              >
+                <option value="">Select Group</option>
+                {groups.map((group) => (
+                  <option key={group.id} value={group.id}>
+                    {group.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedUser}
+                onChange={(e) => setSelectedUser(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3"
+              >
+                <option value="">Select User</option>
+                {users.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} — {user.email}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={addUserToGroup}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Add Member
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white shadow-sm lg:col-span-2">
